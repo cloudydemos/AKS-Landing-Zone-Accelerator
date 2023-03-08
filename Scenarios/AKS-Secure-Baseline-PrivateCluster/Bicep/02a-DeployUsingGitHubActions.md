@@ -14,21 +14,20 @@ This will require performing the following tasks:
 3. Setting Github Actions secrets
 4. Triggering the first GitHub Actions workflow
 
-### Forking this repository into your GitHub account
+## Forking this repository into your GitHub account
 
-* Fork this [repository](https://github.com/Azure/AKS-DevSecOps-Workshop) into your GitHub account by clicking on the "Fork" button at the top right of its page. Use the default name "AKS-Landing-Zone-Accelerator" for this fork in your repo.
+* Fork this [repository](https://github.com/Azure/AKS-Landing-Zone-Accelerator) into your GitHub account by clicking on the "Fork" button at the top right of its page. Use the default name "AKS-Landing-Zone-Accelerator" for this fork in your repo.
 
+## Create AAD Accounts
 
-### Verify Subscription
-
-Login to Azure using the first command below, and then when you run the second command verify that this is the correct subscription where your deployment will be created. Use az account set --name "subscription name" if necessary in order to select the right one.
+Use Azure Cloud Shell in the subscription you want to deploy to. From the Cloud Shell, run these commands to create a group in your Azure AD tenant called "AKS Users". Users in this group will have user permissions to the cluster. You will use the value shown for this in a later step.
 
 ```bash
-az login
-az account show
+az ad group create --display-name "AKS Users" --mail-nickname "AKS-Users"
+AKSUSERACCESSPRINCIPALID=$(az ad group show --group "AKS Users" --query id --output tsv)
 ```
 
-### Configuring OpenID Connect in Azure
+## Configuring OpenID Connect in Azure
 
 1. Create an Azure AD application Used to deploy the IaC to your Azure Subscription
 
@@ -51,21 +50,14 @@ az account show
    ```bash
    subscriptionId=$(az account show --query id --output tsv)
    echo $subscriptionId
-   az role assignment create --role contributer --subscription $subscriptionId --assignee-object-id  $assigneeObjectId --assignee-principal-type ServicePrincipal --scope /subscriptions/$subscriptionId
+   az role assignment create --role contributor --subscription $subscriptionId --assignee-object-id  $assigneeObjectId --assignee-principal-type ServicePrincipal --scope /subscriptions/$subscriptionId
    ```
 
-4. Create a Personal Access Token (PAT) for your repo in GitHub. This is used to create a self-hosted GitHub runner, which is in turn used to deploy code to your cluster. Follow these instructions to create a PAT: [https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token] The scope needs to include "read:org", "repo" and "workflow". The value is used in the next section.
+4. Create a Personal Access Token (PAT) for your repo in GitHub. This is used to create a self-hosted GitHub runner, which is in turn used to deploy code to your cluster. Follow these instructions to create a "Classic" PAT: [https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token] The scopes need to include the top-level "repo" and "workflow" scopes, and also "read:org" which is under "admin:org". Make a temporary note of the value: it is used in the next section.
 
-5. Open the file "cloud-init.yml" and find the token "username" on line 40. Replace "username" with the name of your GitHub account (the text after github.com in your GitHub repo). This is the repo where your self-hosted runner will be created.
+## Register Resource Providers
 
-6. Get the ID of the "AKS Devs" Group you created in the [Earlier Step](./02-aad.md)
-
-   ```bash
-   AKSUSERACCESSPRINCIPALID=$(az ad group show --group "AKS Admins" --query id --output tsv)
-   echo $AKSUSERACCESSPRINCIPALID
-   ```
-
-7. Register Resource Providers
+There are a number of resouce providers required by the IaC that need to be registered once in your subscription. Run the commands below.
 
    ```bash
    az feature register --namespace "Microsoft.Network" --name "AzureFirewallBasic"
@@ -83,7 +75,7 @@ az account show
    az provider register --namespace Microsoft.OperationalInsights
    ```
 
-### Setting Github Actions secrets
+## Setting Github Actions secrets
 
 1. Open your forked Github repository and click on the `Settings` tab.
 2. In the left-hand menu, expand `Secrets and variables`, and click on `Actions`.
@@ -97,7 +89,7 @@ az account show
    * `AKSUSERACCESSPRINCIPALID` (this is the `AKSUSERACCESSPRINCIPALID` from earlier step)
    * `EMAIL` (your email address - used by LetsEncrypt to send notifications.)
 
-### Triggering the GitHub Actions workflow
+## Triggering the GitHub Actions workflow
 
 * Enable GitHub Actions for your repository by clicking on the "Actions" tab, and clicking on the `I understand my workflows, go ahead and enable them` button.
 * To trigger the AKS deployment workflow manually:

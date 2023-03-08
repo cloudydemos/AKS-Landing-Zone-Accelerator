@@ -37,7 +37,7 @@ runcmd:
   - cd /home/runner/actions-runner
   - curl -O -L https://raw.githubusercontent.com/actions/runner/main/scripts/create-latest-svc.sh
   - chmod +x ./create-latest-svc.sh
-  - RUNNER_CFG_PAT=_GITHUB_TOKEN_ bash ./create-latest-svc.sh -s username/AKS-Landing-Zone-Accelerator -u runner -l ubuntu-focal
+  - RUNNER_CFG_PAT=_GITHUB_TOKEN_ bash ./create-latest-svc.sh -s _OWNER_/_REPO_ -u runner -l ubuntu-focal
   - pip3 install pipx
   - echo 'export PATH="$PATH:/home/runner/.local/bin"' >> /home/runner/.bashrc
   - echo '/home/runner/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin' > /home/runner/actions-runner/runner/.path
