@@ -1,8 +1,6 @@
-# Optional - if using GitHub to host code, use GH Actions to deploy the Bicep
+# AKS Cluster Deployment via GitHub Actions using OpenID Connect and Bicep (IaC)
 
-This section is an optional approach to deploying the infrastructure when hosting this repo in GitHub, that makes use of GitHub Actions to ## AKS Cluster Deployment via GitHub Actions using OpenID Connect and Bicep (IaC)
-
-For this workshop, we will be using GitHub Actions using OpenID Connect and Infrastructure-as-Code (IaC) using Bicep to deploy the AKS cluster, to derive following benefits:
+For this approach, we will be using GitHub Actions using OpenID Connect and Infrastructure-as-Code (IaC) using Bicep to deploy the AKS cluster, to derive following benefits:
 
 * Infrastructure-as-Code (IaC) - Infrastructure is defined as code, and can be version controlled and reviewed. 
 * OpenID Connect - OpenID Connect is an authentication protocol that allows you to connect securely to Azure resources using your GitHub account.
@@ -12,17 +10,16 @@ For this workshop, we will be using GitHub Actions using OpenID Connect and Infr
 This will require performing the following tasks:
 
 1. Forking this repository into your GitHub account
-2. Creating an Azure Resource Group
-3. Configuring OpenID Connect in Azure.
-4. Setting Github Actions secrets
-5. Triggering the GitHub Actions workflow
+2. Configuring OpenID Connect in Azure
+3. Setting Github Actions secrets
+4. Triggering the first GitHub Actions workflow
 
 ### Forking this repository into your GitHub account
 
 * Fork this [repository](https://github.com/Azure/AKS-DevSecOps-Workshop) into your GitHub account by clicking on the "Fork" button at the top right of its page. Use the default name "AKS-Landing-Zone-Accelerator" for this fork in your repo.
 
 
-### Creating an Azure Resource Group
+### Verify Subscription
 
 Login to Azure using the first command below, and then when you run the second command verify that this is the correct subscription where your deployment will be created. Use az account set --name "subscription name" if necessary in order to select the right one.
 
@@ -57,7 +54,7 @@ az account show
    az role assignment create --role contributer --subscription $subscriptionId --assignee-object-id  $assigneeObjectId --assignee-principal-type ServicePrincipal --scope /subscriptions/$subscriptionId
    ```
 
-4. Create a Personal Access Token (PAT) in GitHub. This is used to create a self-hosted GitHub runner, which is in turn used to deploy code to your cluster. Follow these instructions to create a PAT: [https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token] The scope needs to include "read:org", "repo" and "workflow". The value is used in the next section.
+4. Create a Personal Access Token (PAT) for your repo in GitHub. This is used to create a self-hosted GitHub runner, which is in turn used to deploy code to your cluster. Follow these instructions to create a PAT: [https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token] The scope needs to include "read:org", "repo" and "workflow". The value is used in the next section.
 
 5. Open the file "cloud-init.yml" and find the token "username" on line 40. Replace "username" with the name of your GitHub account (the text after github.com in your GitHub repo). This is the repo where your self-hosted runner will be created.
 
