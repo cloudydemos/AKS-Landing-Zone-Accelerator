@@ -77,6 +77,8 @@ jobs:
             cd $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/03-Network-Hub/modules/VM
             find . -type f -exec sed -i 's/_OWNER_/${{ env.OWNER }}/g' {} +
             find . -type f -exec sed -i 's/_REPO_/${{ env.REPO }}/g' {} +
+            
+            az bicep version
           
             az deployment sub create -n "ESLZ-HUB-AKS" -l ${{ env.DEPLOYMENT_LOCATION }} -f $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/03-Network-Hub/main.bicep -p $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/03-Network-Hub/parameters-main.json
             
