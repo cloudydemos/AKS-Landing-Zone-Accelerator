@@ -1,0 +1,78 @@
+name: 5) Configure AKS
+permissions:
+      id-token: write
+      contents: read
+on:
+  workflow_run:
+    workflows: [4) Configure AKS Infrastructure]
+    types:
+      - completed
+  workflow_dispatch:
+
+env:
+  AKSESLZ_PATH : ./akselz
+  DEPLOYMENT_LOCATION: eastus
+  RESOURCE_GROUP: ESLZ-SPOKE
+  CLUSTER_NAME: eslzakscluster
+ 
+jobs:
+  on-success:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: self-hosted
+    environment: 'DEV'
+    name: 'Configure Common AKS Services Using Self-Hosted Runner'
+    steps:
+
+      - name: Install AZ CLI Extensions
+        uses: Azure/CLI@v1
+        continue-on-error: true
+        with:
+          azcliversion: latest
+          inlineScript: |
+          
+            az extension add --name k8s-extension
+            az extension update --name k8s-extension
+
+      - name: Install Common Services onto AKS
+        if: ${{ !inputs.CLEAN_UP_ONLY }}
+        uses: Azure/CLI@v1
+        with:
+          azcliversion: latest
+          inlineScript: |
+          
+            # Login using the Managed Identity of the self-hosted GH runner VM
+            az login --identity
+            
+            # Enable OIDC Issuer 
+            az aks update --resource-group ${{ env.RESOURCE_GROUP }} --name ${{ env.CLUSTER_NAME }} --enable-oidc-issuer
+            echo 'oidcIssuerProfile.issuerUrl:' $(az aks show --resource-group ${{ env.RESOURCE_GROUP }} --name ${{ env.CLUSTER_NAME }} --query "oidcIssuerProfile.issuerUrl" -otsv)
+            
+            # Install Kured
+            az aks command invoke --resource-group ${{ env.RESOURCE_GROUP }} --name ${{ env.CLUSTER_NAME }} --command "helm repo add kubereboot https://kubereboot.github.io/charts/ && helm repo update && kubectl create namespace kured && helm install kured kubereboot/kured --namespace kured"
+            
+            # Install Kubecost
+            az aks command invoke --resource-group ${{ env.RESOURCE_GROUP }} --name ${{ env.CLUSTER_NAME }} --command "kubectl create namespace kubecost && helm repo add kubecost https://kubecost.github.io/cost-analyzer/ && helm install kubecost kubecost/cost-analyzer --namespace kubecost --set kubecostToken=YWxnaWJib25AbWljcm9zb2Z0LmNvbQ==xm343yadf98"
+
+            # Install KEDA
+            # az aks command invoke --resource-group ${{ env.RESOURCE_GROUP }} --name ${{ env.CLUSTER_NAME }} --command "helm repo add kedacore https://kedacore.github.io/charts/ && helm repo update && kubectl create namespace keda && helm install keda kedacore/keda --namespace keda"
+            az aks update --resource-group ${{ env.RESOURCE_GROUP }} --name ${{ env.CLUSTER_NAME }} --enable-keda
+            
+            # Install Open Service Mesh
+            az aks enable-addons --resource-group ${{ env.RESOURCE_GROUP }} --name ${{ env.CLUSTER_NAME }} --addons open-service-mesh 
+            
+            # Install DAPR (this does not appear to be idempotent - editing out for now)
+            # az k8s-extension create --cluster-type managedClusters --cluster-name ${{ env.CLUSTER_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} --name dapr --extension-type Microsoft.Dapr --auto-upgrade-minor-version true --configuration-settings "skipExistingDaprCheck=true"
+
+            # Install Let's Encrypt Certificate Manager
+            curl -O -L https://github.com/cert-manager/cert-manager/releases/download/v1.10.1/cert-manager.yaml
+            az aks command invoke --resource-group ${{ env.RESOURCE_GROUP }} --name ${{ env.CLUSTER_NAME }} --command "kubectl apply -f cert-manager.yaml" --file cert-manager.yaml
+
+      - name: Log out
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+          
+            # Log out as per best practices for self-hosted runners (https://github.com/Azure/login#az-logout-and-security-hardening)          
+            az logout
+            az cache purge
+            az account clear

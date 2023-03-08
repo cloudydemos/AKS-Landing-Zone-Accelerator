@@ -16,3 +16,12 @@ This section is organized using folders that match the steps outlined below. Mak
 6. [Creation of AKS & enabling Addons](./06-aks-cluster.md)
 7. [Deploy a Basic Workload](./07-workload.md)
 8. [Clean up](./08-cleanup.md)
+
+## Optional: Deploy using GitHub Actions
+
+This section can be followed instead of the "Getting Started" section above, if using GitHub. Follow these steps to have GitHub Actions deploy the templates automatically instead of manually following the steps above for a fully automated deployment of the same templates.
+
+1. Prerequisites: Clone this repo to GitHub, install [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), install [Bicep tools](https://learn.microsoft.com/azure/azure-resource-manager/bicep/install)
+2. [Create or Import Azure Active Directory Groups for AKS Cluster Admins and AKS Cluster Users](./02-aad.md)
+3. [Deploy using GitHub Actions](./02a-DeployUsingGitHubActions.md)
+4. [Clean up](./08-cleanup.md)

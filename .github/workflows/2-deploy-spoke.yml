@@ -1,0 +1,82 @@
+name: 2) Deploy Enterprise Landing Zone Spoke
+permissions:
+      id-token: write
+      contents: read
+on:
+  workflow_run:
+    workflows: [1) Deploy Enterprise Landing Zone Hub]
+    types:
+      - completed
+  workflow_dispatch:
+
+env:
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AKSESLZ_PATH : ./akselz
+  DEPLOYMENT_LOCATION: eastus
+  vmSize: Standard_B4ms
+ 
+jobs:
+  on-success:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: 'DEV'
+    name: 'Deploy spoke to dev landing zone hub'
+    steps:
+      - name: Check out Repo
+        uses: actions/checkout@v3
+        with:
+          path: ${{ env.AKSESLZ_PATH }}
+        
+      - name: Azure Login
+        uses: Azure/login@v1
+        if: ${{ env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != '' && env.AZURE_SUBSCRIPTION_ID != ''}}
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+    
+      - name: Create Random 24-character Name for our KeyVault
+        run: | 
+        
+            # KEYVAULT_NAME=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 24 | head -n 1)
+            echo 'KEYVAULT_NAME=kv'$(uuidgen) | sed 's/-//g' | cut -c 1-38 >> $GITHUB_ENV
+
+      - name: Create Random 24-character Name for our Container Registry
+        run: | 
+        
+            # ACR_NAME=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 24 | head -n 1)
+            echo 'ACR_NAME=cr'$(uuidgen) | sed 's/-//g' | cut -c 1-33 >> $GITHUB_ENV
+        
+      - name: Create Random 24-character Name for our Storage Account
+        run: | 
+        
+            # STORAGE_ACCOUNT_NAME=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 24 | head -n 1)
+            echo 'STORAGE_ACCOUNT_NAME=s'$(uuidgen) | sed 's/-//g' | cut -c 1-45 >> $GITHUB_ENV
+
+      - name: Create Spoke
+        uses: Azure/CLI@v1
+        with:
+          azcliversion: latest
+          inlineScript: |
+          
+            az deployment sub create -n "ESLZ-Spoke-AKS" -l ${{ env.DEPLOYMENT_LOCATION }} -f $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/04-Network-LZ/main.bicep -p $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/04-Network-LZ/parameters-main.json
+            
+      - name: Create AKS Supporting Resources in Spoke
+        uses: Azure/CLI@v1
+        with:
+          azcliversion: latest
+          inlineScript: |
+          
+            az deployment sub create -n "ESLZ-AKS-Supporting" -l ${{ env.DEPLOYMENT_LOCATION }} -f $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/05-AKS-supporting/main.bicep -p $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/05-AKS-supporting/parameters-main.json -p acrName=${{ env.ACR_NAME }} -p keyvaultName=${{ env.KEYVAULT_NAME }} -p storageAccountName=${{ env.STORAGE_ACCOUNT_NAME }} 
+        
+      - name: Update UDR
+        uses: nick-fields/retry@v2
+        with:
+           timeout_seconds: 300
+           max_attempts: 5
+           retry_on: error
+           command: |
+          
+            az deployment sub create -n "ESLZ-AKS-SPOKE-UDRNSG" -l ${{ env.DEPLOYMENT_LOCATION }} -f $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/04-Network-LZ/updateUDR-NSG.bicep -p $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/04-Network-LZ/parameters-updateUDR-NSG.json

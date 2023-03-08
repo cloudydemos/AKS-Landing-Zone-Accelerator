@@ -52,3 +52,5 @@ override.tf.json
 *.vs
 
 !.vscode/cspell.json #workspace spelling should be source controlled
+
+.vscode

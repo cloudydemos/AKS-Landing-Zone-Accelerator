@@ -1,0 +1,123 @@
+name: 1) Deploy Enterprise Landing Zone Hub
+permissions:
+      id-token: write
+      contents: read
+on:
+  workflow_dispatch:
+   inputs:
+    DELETE_EXISTING_RESOURCES:
+     description: 'Delete everything previously created first?'
+     required: true
+     type: boolean
+     default: false
+
+env:
+  AKSESLZ_PATH : ./akselz
+  DEPLOYMENT_LOCATION: eastus
+  DEPLOYMENT_NAME: aks-eslz
+  HUB_RESOURCE_GROUP: ESLZ-HUB
+  FIREWALL_NAME: AZFW
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  VM_PW: ${{ secrets.VM_PW }}
+  RUNNER_CFG_PAT: ${{ secrets.RUNNER_CFG_PAT }}
+ 
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: 'DEV'
+    name: 'Deploy to dev landing zone'
+    steps:
+        
+      - name: Azure Login
+        uses: Azure/login@v1
+        if: ${{ env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != '' && env.AZURE_SUBSCRIPTION_ID != ''}}
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Remove previous resources
+        uses: Azure/CLI@v1
+        if: ${{ inputs.DELETE_EXISTING_RESOURCES }}
+        with:
+          azcliversion: latest
+          inlineScript: |
+          
+            az group delete -n ${{ env.HUB_RESOURCE_GROUP }} -y
+            az deployment sub delete -n ESLZ-HUB-AKS
+            az deployment sub delete -n ESLZ-AKS-HUB-UDR
+            az deployment sub delete -n ESLZ-HUB-VM
+            az deployment sub delete -n ESLZ-HUB-RUNNER
+            
+      - name: Get ID of previously-created self-hosted GH Runner on this repo
+        if: ${{ inputs.DELETE_EXISTING_RESOURCES }}
+        run: | 
+        
+          existingSelfHostedRunnerId="$(gh api --hostname github.com  /repos/$OWNER/$REPO/actions/runners --jq ".runners[0].id")"
+          echo 'SelfHostedRunnerId='$existingSelfHostedRunnerId >> $GITHUB_ENV
+          
+      - name: Delete self-hosted GH Runner on this repo, if one was found
+        if: ${{ inputs.DELETE_EXISTING_RESOURCES && env.SelfHostedRunnerId != '' }}
+        run: gh api --method "DELETE" --hostname "github.com"  /repos/$OWNER/$REPO/actions/runners/$SelfHostedRunnerId
+    
+      - name: Check out Repo
+        uses: actions/checkout@v3
+        with:
+          path: ${{ env.AKSESLZ_PATH }}
+
+      - name: Create ESLZ Hub
+        uses: Azure/CLI@v1
+        with:
+          azcliversion: latest
+          inlineScript: |
+          
+            az deployment sub create -n "ESLZ-HUB-AKS" -l ${{ env.DEPLOYMENT_LOCATION }} -f $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/03-Network-Hub/main.bicep -p $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/03-Network-Hub/parameters-main.json
+            
+      - name: Create UDR
+        uses: Azure/CLI@v1
+        with:
+          azcliversion: latest
+          inlineScript: |
+          
+            az deployment sub create -n "ESLZ-AKS-HUB-UDR" -l ${{ env.DEPLOYMENT_LOCATION }} -f $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/03-Network-Hub/updateUDR.bicep -p $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/03-Network-Hub/parameters-updateUDR.json
+
+      - name: Get CIDR of VM Subnet
+        uses: Azure/CLI@v1
+        with:
+          azcliversion: latest
+          inlineScript: |
+          
+            VM_SUBNET_CIDR="$(az network vnet subnet show --resource-group ${{ env.HUB_RESOURCE_GROUP }} --name vmsubnet --vnet-name VNet-HUB --query addressPrefix --output tsv)"
+            echo 'VM_SUBNET_CIDR='$VM_SUBNET_CIDR >> $GITHUB_ENV
+
+      - name: Update Firewall to allow VMs out
+        uses: Azure/CLI@v1
+        with:
+          azcliversion: latest
+          inlineScript: |
+          
+            az config set extension.use_dynamic_install=yes_without_prompt
+          
+            # Allow VM's out
+            az network firewall network-rule create --collection-name 'runner-egress' --destination-ports '*' --dest-addr '*' --firewall-name ${{ env.FIREWALL_NAME }} --name 'Allow-Runner-Egress' --protocols Tcp --resource-group ${{ env.HUB_RESOURCE_GROUP }} --action Allow --source-addresses '${{ env.VM_SUBNET_CIDR }}' --priority 360
+            
+      - name: Create Jumbox VM
+        uses: Azure/CLI@v1
+        if: ${{ env.VM_PW != '' }} 
+        with:
+          azcliversion: latest
+          inlineScript: |
+          
+            az deployment sub create -n "ESLZ-HUB-VM" -l ${{ env.DEPLOYMENT_LOCATION }} -f $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/03-Network-Hub/deploy-vm.bicep -p $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/03-Network-Hub/parameters-deploy-vm.json -p adminPassword=${{ env.VM_PW }}
+            
+      - name: Create GitHub Runner VM
+        uses: Azure/CLI@v1
+        if: ${{ env.VM_PW != '' &&  env.RUNNER_CFG_PAT != '' }} 
+        with:
+          azcliversion: latest
+          inlineScript: |
+          
+            az deployment sub create -n "ESLZ-HUB-RUNNER" -l ${{ env.DEPLOYMENT_LOCATION }} -f $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/03-Network-Hub/deploy-runner.bicep -p $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/03-Network-Hub/parameters-deploy-runner.json -p adminPassword=${{ env.VM_PW }} -p ghtoken=${{ env.RUNNER_CFG_PAT }}
+            

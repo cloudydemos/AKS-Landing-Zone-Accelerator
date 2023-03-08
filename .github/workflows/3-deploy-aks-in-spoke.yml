@@ -1,0 +1,76 @@
+name: 3) Deploy AKS in Landing Zone Spoke
+permissions:
+      id-token: write
+      contents: read
+on:
+  workflow_run:
+    workflows: [2) Deploy Enterprise Landing Zone Spoke]
+    types:
+      - completed
+  workflow_dispatch:
+
+env:
+
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }} 
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AKSUSERACCESSPRINCIPALID: ${{ secrets.AKSUSERACCESSPRINCIPALID  }} # Needs to be a valid User or Group ID e.g. az ad group show --group 'AKS Admins' --query id --output tsv
+  AKSESLZ_PATH : ./akselz
+  DEPLOYMENT_LOCATION: eastus
+  DEPLOYMENT_NAME: ESLZ-AKS-CLUSTER
+  RESOURCE_GROUP: ESLZ-SPOKE
+  CLUSTER_NAME: eslzakscluster
+  LOG_ANALYTICS_WORKSPACE_NAME: eslzlaworkspace
+  vmSize: Standard_D4d_v5
+  RUNNER_VM_NAME: runner
+ 
+jobs:
+  on-success:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: 'DEV'
+    name: 'Deploy AKS to dev landing zone spoke'
+    steps:
+    
+      - name: Check out Repo
+        uses: actions/checkout@v3
+        with:
+          path: ${{ env.AKSESLZ_PATH }}
+        
+      - name: Azure Login
+        uses: Azure/login@v1
+        if: ${{ env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != '' && env.AZURE_SUBSCRIPTION_ID != ''}}
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+          
+      - name: Set Environment Variables
+        uses: Azure/CLI@v1
+        with:
+          azcliversion: latest
+          inlineScript: |
+          
+            RUNNER_MANAGED_IDENTITY_PRINCIPAL_ID="$(az resource list -n ${{ env.RUNNER_VM_NAME }} --query [*].identity.principalId --out tsv)"
+            echo 'RUNNER_MANAGED_IDENTITY_PRINCIPAL_ID='$RUNNER_MANAGED_IDENTITY_PRINCIPAL_ID >> $GITHUB_ENV
+          
+            KEYVAULT_NAME=$(az keyvault list --resource-group ${{ env.RESOURCE_GROUP }} --query [0].name -o tsv)
+            echo 'KEYVAULT_NAME='$KEYVAULT_NAME >> $GITHUB_ENV
+          
+            ACR_NAME="$(az acr list --resource-group ${{ env.RESOURCE_GROUP }} --query [0].name -o tsv)"
+            echo 'ACR_NAME='$ACR_NAME >> $GITHUB_ENV
+          
+            AKS_VERSION=$(az aks get-versions --location ${{ env.DEPLOYMENT_LOCATION }} --query "orchestrators[].orchestratorVersion | max(@)" --output tsv)
+            echo 'AKS_VERSION='$AKS_VERSION >> $GITHUB_ENV 
+            
+            AKS_ID="$(az aks list --resource-group ${{ env.RESOURCE_GROUP }} --query [0].id -o tsv)"
+            echo 'AKS_ID='$AKS_ID >> $GITHUB_ENV
+
+      - name: Create AKS in Spoke
+        uses: Azure/CLI@v1
+        with:
+          azcliversion: latest
+          inlineScript: |
+            
+            az deployment sub create --name ${{ env.DEPLOYMENT_NAME }} --location ${{ env.DEPLOYMENT_LOCATION }} -f $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/06-AKS-cluster/main.bicep -p $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Bicep/06-AKS-cluster/parameters-main.json -p clusterName=${{ env.CLUSTER_NAME }} -p vmSize=${{ env.vmSize }} -p acrName=${{ env.ACR_NAME }} -p keyvaultName=${{ env.KEYVAULT_NAME }} -p kubernetesVersion=${{ env.AKS_VERSION }} -p networkPlugin=azure -p aksuseraccessprincipalId=${{ env.AKSUSERACCESSPRINCIPALID }} -p aksadminaccessprincipalId=${{ env.RUNNER_MANAGED_IDENTITY_PRINCIPAL_ID }} -p akslaWorkspaceName=${{ env.LOG_ANALYTICS_WORKSPACE_NAME }}
+            

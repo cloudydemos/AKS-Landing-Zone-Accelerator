@@ -1,0 +1,91 @@
+name: 7) Expose Sample Workload Externally
+permissions:
+      id-token: write
+      contents: read
+on:
+  workflow_run:
+    workflows: [6) Deploy Internal Sample Workload]
+    types:
+      - completed
+  workflow_dispatch:
+
+env:
+  EMAIL: ${{ secrets.EMAIL }}
+  AKSESLZ_PATH : ./akselz
+  DEPLOYMENT_LOCATION: eastus
+  RESOURCE_GROUP: ESLZ-SPOKE
+  CLUSTER_NAME: eslzakscluster
+  SPOKE_VNET_NAME: VNet-SPOKE
+  SPOKE_SUBNET_NAME: servicespe
+  
+jobs:
+  on-success:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: self-hosted
+    environment: 'DEV'
+    name: 'Expose Sample Workload Externally'
+    steps:
+    
+      - name: Create Random DNS Name for this app on our Application Gateway
+        run: | 
+
+            echo 'Random_DNS=z'$(uuidgen) | sed 's/-//g' >> $GITHUB_ENV
+
+      - name: Find ACR Name
+        uses: Azure/CLI@v1
+        with:
+          azcliversion: latest
+          inlineScript: |
+          
+            az login --identity # Login as the VM's Managed Identity
+            ACR_NAME="$(az acr list --resource-group ${{ env.RESOURCE_GROUP }} --query [0].name -o tsv)"
+            echo 'ACR_NAME='$ACR_NAME >> $GITHUB_ENV
+
+      - name: Update DNS of our App GW Public IP
+        uses: Azure/CLI@v1
+        with:
+          azcliversion: latest
+          inlineScript: |
+            
+            az network public-ip update --resource-group ${{ env.RESOURCE_GROUP }} --name APPGW-PIP --dns-name ${{ env.Random_DNS }}
+            APPGW_FQDN=$(az network public-ip show --name APPGW-PIP --resource-group ${{ env.RESOURCE_GROUP }} --query dnsSettings.fqdn -o tsv)
+            echo 'APPGW_FQDN='$APPGW_FQDN >> $GITHUB_ENV
+            
+      - name: Find AKS ID
+        uses: Azure/CLI@v1
+        with:
+          azcliversion: latest
+          inlineScript: |
+          
+            AKS_ID="$(az aks list --resource-group ${{ env.RESOURCE_GROUP }} --query [0].id -o tsv)"
+            echo 'AKS_ID='$AKS_ID >> $GITHUB_ENV
+            
+      - name: Check out this Repo
+        uses: actions/checkout@v2
+        with:
+          path: ${{ env.AKSESLZ_PATH }}
+          
+      - name: Edit local copy of YAML
+        if: ${{ env.APPGW_FQDN != '' && env.EMAIL != '' }}
+        run: |
+
+          cd $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Apps/RatingsApp
+          find . -type f -exec sed -i 's/<fqdn>/${{ env.APPGW_FQDN }}/g' {} +
+          find . -type f -exec sed -i 's/<your e-mail here>/${{ env.EMAIL }}/g' {} +
+
+      - name: Deploy Certificate Issuer and Ingress using App Gateway
+        uses: Azure/CLI@v1
+        with:
+          azcliversion: latest
+          inlineScript: |
+            az login --identity
+            az aks command invoke --resource-group ${{ env.RESOURCE_GROUP }} --name ${{ env.CLUSTER_NAME }} --command "kubectl apply -f certificateIssuer.yaml -n ratingsapp" --file $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Apps/RatingsApp/certificateIssuer.yaml
+            az aks command invoke --resource-group ${{ env.RESOURCE_GROUP }} --name ${{ env.CLUSTER_NAME }} --command "kubectl apply -f 5-https-ratings-web-ingress.yaml -n ratingsapp" --file $GITHUB_WORKSPACE/${{ env.AKSESLZ_PATH }}/Scenarios/AKS-Secure-Baseline-PrivateCluster/Apps/RatingsApp/5-https-ratings-web-ingress.yaml
+   
+      - name: Log out as per best practices for self-hosted runners (https://github.com/Azure/login#az-logout-and-security-hardening)
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            az logout
+            az cache purge
+            az account clear
