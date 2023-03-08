@@ -28,7 +28,6 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: 'DEV'
     name: 'Deploy to dev landing zone'
     steps:
         

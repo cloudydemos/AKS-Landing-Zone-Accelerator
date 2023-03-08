@@ -25,11 +25,12 @@ Use Azure Cloud Shell in the subscription you want to deploy to. From the Cloud 
 ```bash
 az ad group create --display-name "AKS Users" --mail-nickname "AKS-Users"
 AKSUSERACCESSPRINCIPALID=$(az ad group show --group "AKS Users" --query id --output tsv)
+echo $AKSUSERACCESSPRINCIPALID
 ```
 
 ## Configuring OpenID Connect in Azure
 
-1. Create an Azure AD application Used to deploy the IaC to your Azure Subscription
+1. Create an Azure AD application Used to deploy the IaC to your Azure Subscription. Make a note of the appId value that is shown by the last step, you will use this value in later steps.
 
    ```bash
    uniqueAppName=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c10 ; echo '')
@@ -38,22 +39,35 @@ AKSUSERACCESSPRINCIPALID=$(az ad group show --group "AKS Users" --query id --out
    echo $appId
    ```
 
-2. Create a service principal for the Azure AD app.
+2. Create a service principal for the Azure AD app. Make a note of the assigneeObjectId value that is shown by the last step, you will use this value in later steps.
 
    ```bash
    assigneeObjectId=$(az ad sp create --id $appId --query id --output tsv)
    echo $assigneeObjectId 
    ```
 
-3. Create a role assignment for the Azure AD app. This gives that app contributer access to the currently selected subscription.
+3. Create a role assignment for the Azure AD app. This gives that app contributor access to the currently selected subscription.
 
    ```bash
    subscriptionId=$(az account show --query id --output tsv)
-   echo $subscriptionId
    az role assignment create --role contributor --subscription $subscriptionId --assignee-object-id  $assigneeObjectId --assignee-principal-type ServicePrincipal --scope /subscriptions/$subscriptionId
    ```
 
-4. Create a Personal Access Token (PAT) for your repo in GitHub. This is used to create a self-hosted GitHub runner, which is in turn used to deploy code to your cluster. Follow these instructions to create a "Classic" PAT: [https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token] The scopes need to include the top-level "repo" and "workflow" scopes, and also "read:org" which is under "admin:org". Make a temporary note of the value: it is used in the next section.
+4. Configure a federated identity credential on the Azure AD app.
+
+   You use workload identity federation to configure your Azure AD app registration to trust tokens from an external identity provider (IdP), in this case GitHub.
+
+   In the parameter of the command below, replace `<your-github-username>` with your GitHub username used in your forked repo. If you name your new repository something other than `AKS-Landing-Zone-Accelerator`, you will need to replace `AKS-Landing-Zone-Accelerator` with the name of your repository. Also, if your deployment branch is not `main`, you will need to replace `main` with the name of your deployment branch.
+
+   ```bash
+   az ad app federated-credential create --id $appId --parameters az ad app federated-credential create --id $appId --parameters "{ \"name\": \"gha-oidc\", \"issuer\": \"https://token.actions.githubusercontent.com\",  \"subject\": \"repo:<your-github-username>/AKS-Landing-Zone-Accelerator:ref:refs/heads/main\", \"audiences\": [\"api://AzureADTokenExchange\"], \"description\": \"Workload Identity for AKS Landing Zone Accelerator\" }"
+   ```
+
+## Create a Personal Access Token (PAT)
+
+You also need a Personal Access Token (PAT) for your forked repo in GitHub. This PAT is used to create a private self-hosted GitHub runner against this repo, which is in turn used to deploy code to your cluster.
+
+Follow these instructions to create a "Classic" PAT: [https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token] The scopes need to include the top-level "repo" and "workflow" scopes, and also "read:org" which is under "admin:org". Make a temporary note of the value: it is used in the next section.
 
 ## Register Resource Providers
 
@@ -80,23 +94,21 @@ There are a number of resouce providers required by the IaC that need to be regi
 1. Open your forked Github repository and click on the `Settings` tab.
 2. In the left-hand menu, expand `Secrets and variables`, and click on `Actions`.
 3. Click on the `New repository secret` button for each of the following secrets:
-   * `AZURE_SUBSCRIPTION_ID`(this is the `subscriptionId`from the previous step)
+   * `AZURE_SUBSCRIPTION_ID`(run `az account show --query id --output tsv` to get this value)
    * `AZURE_TENANT_ID` (run `az account show --query tenantId --output tsv` to get the value)
-   * `AZURE_CLIENT_ID` (this is the `appId` from the JSON output of the `az ad app create` command)
-   * `CLUSTER_RESOURCE_GROUP` (this is the `resourceGroupName` from earlier step)
+   * `AZURE_CLIENT_ID` (this is the `appId` from the JSON output of the `az ad app create` command above)
    * `VM_PW` (this is the password you want your VM to be set to)
    * `RUNNER_CFG_PAT` (this is the `Personal Access Token` from earlier step)
-   * `AKSUSERACCESSPRINCIPALID` (this is the `AKSUSERACCESSPRINCIPALID` from earlier step)
+   * `AKSUSERACCESSPRINCIPALID` (run `az ad group show --group "AKS Users" --query id --output tsv` to get this value)
    * `EMAIL` (your email address - used by LetsEncrypt to send notifications.)
 
 ## Triggering the GitHub Actions workflow
 
 * Enable GitHub Actions for your repository by clicking on the "Actions" tab, and clicking on the `I understand my workflows, go ahead and enable them` button.
-* To trigger the AKS deployment workflow manually:
-  * click on the `Actions` tab.
-  * Select `.github/workflows/1-deploy-hub.yml`.
-  * Click on the `Run workflow` button and accept the default options.
-  * This will trigger the first workflow. There are seven altogether and each will trigger the next until all seven are complete. This may take some time.
+* Click on the "1) Deploy Enterprise Landing Zone Hub" Workflow on the left of the screen
+* Click on the `Run workflow` button, accept the default options (leave the checkbox unchecked)
+
+This will trigger the first workflow. There are seven altogether and each will trigger the next until all seven are complete. This may take some time.
 
 ## Next Step
 

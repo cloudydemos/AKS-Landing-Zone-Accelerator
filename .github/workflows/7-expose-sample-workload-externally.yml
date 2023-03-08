@@ -22,7 +22,6 @@ jobs:
   on-success:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: self-hosted
-    environment: 'DEV'
     name: 'Expose Sample Workload Externally'
     steps:
     

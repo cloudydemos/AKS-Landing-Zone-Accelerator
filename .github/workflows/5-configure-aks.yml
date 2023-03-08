@@ -19,7 +19,6 @@ jobs:
   on-success:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: self-hosted
-    environment: 'DEV'
     name: 'Configure Common AKS Services Using Self-Hosted Runner'
     steps:
 
